@@ -1,17 +1,10 @@
-import anthropic
 import psycopg2
 import json
 from datetime import datetime, timezone
 import os
 import sys
 
-try:
-    import anthropic
-except ImportError:
-    print("Warning: anthropic module not available")
-    anthropic = None
-
-# ✅ Claude API Configuration (Using Official SDK)
+# ✅ Claude API Configuration (Using direct HTTP)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # ✅ PostgreSQL Connection Credentials (Direct Connection)
@@ -97,8 +90,52 @@ def create_default_metrics():
     
     return metrics
 
-# ✅ Send request to Claude API using Official SDK
-def analyze_news_sentiment(symbol):
+def call_claude_api(prompt, system_prompt):
+    """Call Claude API directly using HTTP requests."""
+    if not ANTHROPIC_API_KEY:
+        print("⚠️ No Anthropic API key provided")
+        return None
+        
+    import requests
+    
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01"
+    }
+    
+    data = {
+        "model": "claude-3-7-sonnet-20250219",
+        "max_tokens": 1500,
+        "temperature": 0.3,
+        "system": system_prompt,
+        "messages": [
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ]
+    }
+    
+    try:
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=data
+        )
+        
+        if response.status_code == 200:
+            return response.json()['content'][0]['text']
+        else:
+            print(f"❌ API request failed: {response.status_code} - {response.text}")
+            return None
+    
+    except Exception as e:
+        print(f"❌ Error calling Claude API: {e}")
+        return None
+
+# ✅ Send request to Claude API using direct HTTP requests
+def analyze_sec_filings(symbol):
     """Send SEC filings to Claude for sentiment analysis."""
     filings = fetch_sec_filings(symbol)
 
@@ -141,8 +178,11 @@ Provide detailed analysis for these specific financial metrics:
 
 For each metric, explain how the SEC filings affect bull case, base case, and bear case scenarios."""
 
-    if anthropic is None:
-        print("⚠️ Anthropic module not available - using simulated analysis")
+    # Use direct HTTP request instead of Anthropic client
+    text_content = call_claude_api(user_prompt, system_prompt)
+    
+    if not text_content:
+        print("Falling back to simulated analysis")
         text_content = f"""## Revenue Growth (%)
 
 Bull Case: SEC filings for {symbol} indicate strong product roadmap and market expansion plans.
@@ -166,69 +206,6 @@ Bear Case: Input cost increases and pricing pressure mentioned in risk factors.
 Importance: Medium
 
 Confidence: Medium"""
-    else:
-        # Initialize the client carefully
-        try:
-            if hasattr(anthropic, 'Anthropic'):
-                client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-            else:
-                client = anthropic.Client(api_key=ANTHROPIC_API_KEY)
-                
-            # Try the newer messages API first
-            try:
-                if hasattr(client, 'messages') and hasattr(client.messages, 'create'):
-                    print("Using newer Anthropic messages API")
-                    message = client.messages.create(
-                        model="claude-3-7-sonnet-20250219",
-                        max_tokens=1500,
-                        temperature=0.3,
-                        system=system_prompt,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": user_prompt
-                                    }
-                                ]
-                            }
-                        ]
-                    )
-                    
-                    # Extract text content from the structured response
-                    text_content = ""
-                    for block in message.content:
-                        if hasattr(block, 'text'):
-                            text_content += block.text
-                        elif isinstance(block, dict) and 'text' in block:
-                            text_content += block['text']
-                
-                # Fall back to older API if needed
-                else:
-                    print("Using legacy Anthropic completion API")
-                    full_prompt = f"\n\nHuman: {user_prompt}\n\nAssistant:"
-                    if hasattr(client, 'completion'):
-                        response = client.completion(
-                            prompt=full_prompt,
-                            model="claude-2.0",
-                            max_tokens_to_sample=1500,
-                            temperature=0.3
-                        )
-                        text_content = response.completion
-                    else:
-                        print("Neither messages.create nor completion method found")
-                        text_content = "API method not found"
-                        
-            except Exception as e:
-                print(f"❌ Error calling Anthropic API method: {e}")
-                print("Falling back to simulated analysis")
-                return create_default_metrics()
-                
-        except Exception as e:
-            print(f"❌ Error initializing Anthropic client: {e}")
-            print("Falling back to simulated analysis")
-            return create_default_metrics()
     
     print("\n--- Claude's Response ---")
     print(text_content[:500] + "..." if len(text_content) > 500 else text_content)
@@ -464,7 +441,7 @@ if __name__ == "__main__":
         symbol = "AAPL"
         print(f"⚠️ No ticker provided, using default: {symbol}")
     
-    metrics = analyze_news_sentiment(symbol)
+    metrics = analyze_sec_filings(symbol)
     if metrics:
         store_ai_forecast(symbol, metrics)
         print(f"🚀 AI SEC filing analysis for {symbol} completed and stored!")
