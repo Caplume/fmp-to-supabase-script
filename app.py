@@ -49,20 +49,22 @@ def run_script():
 @app.route('/', methods=['GET'])
 def index():
     """Home page with instructions."""
-    return """
-    <html>
-        <head>
-            <title>Financial Data Scripts API</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-                code { background: #f4f4f4; padding: 2px 5px; }
-                pre { background: #f4f4f4; padding: 10px; border-radius: 5px; }
-            </style>
-        </head>
-        <body>
-            <h1>Financial Data Scripts API</h1>
-            <p>Use this API to run financial data collection and analysis scripts.</p>
-            
-            <h2>Available Endpoints:</h2>
-            <ul>
-                <li><code>GET /health</code> - Check if the service is ru
+    html = '<html>'
+    html += '<head><title>Financial Data Scripts API</title>'
+    html += '<style>body{font-family:Arial,sans-serif;margin:40px;line-height:1.6;}'
+    html += 'code{background:#f4f4f4;padding:2px 5px;}'
+    html += 'pre{background:#f4f4f4;padding:10px;border-radius:5px;}</style></head>'
+    html += '<body><h1>Financial Data Scripts API</h1>'
+    html += '<p>Use this API to run financial data collection and analysis scripts.</p>'
+    html += '<h2>Available Endpoints:</h2><ul>'
+    html += '<li><code>GET /health</code> - Check if the service is running</li>'
+    html += '<li><code>POST /run-script</code> - Run a script with a ticker symbol</li>'
+    html += '</ul><h2>Example Usage:</h2>'
+    html += '<pre>POST /run-script\nContent-Type: application/json\n\n{'
+    html += '"symbol": "AAPL"}</pre></body></html>'
+    
+    return html
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
