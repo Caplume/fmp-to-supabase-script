@@ -7,10 +7,11 @@ import sys
 
 # ✅ Claude API Configuration (Using Official SDK)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-try:
+
+# Initialize Anthropic client based on available classes
+if hasattr(anthropic, 'Anthropic'):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-except TypeError:
-    # Fall back to older API style if needed
+else:
     client = anthropic.Client(api_key=ANTHROPIC_API_KEY)
 
 # ✅ PostgreSQL Connection Credentials (Direct Connection)
