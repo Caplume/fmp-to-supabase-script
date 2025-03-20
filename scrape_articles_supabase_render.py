@@ -96,15 +96,10 @@ def store_articles_in_supabase(articles):
 
     try:
         # Use connection pooler with pgbouncer parameter
-        conn = psycopg2.connect(
-            dbname=DB_NAME, 
-            user=DB_USER, 
-            password=DB_PASSWORD, 
-            host=DB_HOST, 
-            port=DB_PORT,
-            options="-c application_name=scraper -c statement_timeout=60000",
-            sslmode="require"
-        )
+        conn_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=require"
+        print(f"Connecting with: {conn_string}") # Add this for debugging
+        conn = psycopg2.connect(conn_string)
+
         cur = conn.cursor()
 
         for article in articles:
