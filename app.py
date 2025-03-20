@@ -29,7 +29,7 @@ def run_script():
         "scrape_sec_filings_render.py",
         "fetch_press_releases_render.py",
         "analyze_news_sentiment_render.py",
-        "analyze_sec_filings_render.py"
+        "analyze_sec_filings_render.py",
         "generate_comprehensive_forecast_render.py"
     ]
     
