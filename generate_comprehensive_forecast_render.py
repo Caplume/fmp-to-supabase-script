@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import os
 import sys
 import requests
+import time
+import traceback
 
 # ✅ Claude API Configuration (Using direct HTTP)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -15,9 +17,12 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD", "")  # Set via environment variables
 DB_HOST = os.environ.get("DB_HOST", "db.aybqlqgrbcxxuvmuibdx.supabase.co")  # Direct connection
 DB_PORT = os.environ.get("DB_PORT", "5432")  # Standard PostgreSQL port
 
-# ✅ Function to call Claude API
-def call_claude_api(prompt, system_prompt):
-    """Call Claude API directly using HTTP requests."""
+# Add a timeout for API calls
+CLAUDE_API_TIMEOUT = 120  # seconds
+
+# ✅ Function to call Claude API with retry mechanism
+def call_claude_api(prompt, system_prompt, max_retries=3, backoff_factor=2):
+    """Call Claude API directly using HTTP requests with retry logic."""
     if not ANTHROPIC_API_KEY:
         print("⚠️ No Anthropic API key provided")
         return None
@@ -41,22 +46,45 @@ def call_claude_api(prompt, system_prompt):
         ]
     }
     
-    try:
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers=headers,
-            json=data
-        )
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 API attempt {attempt+1}/{max_retries}...")
+            
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=data,
+                timeout=CLAUDE_API_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                return response.json()['content'][0]['text']
+            else:
+                print(f"❌ API request failed: {response.status_code} - {response.text}")
+                
+                # Check if we should retry based on status code
+                if response.status_code in [429, 500, 502, 503, 504]:
+                    sleep_time = backoff_factor ** attempt
+                    print(f"⏱️ Retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                else:
+                    # Non-retriable error
+                    return None
         
-        if response.status_code == 200:
-            return response.json()['content'][0]['text']
-        else:
-            print(f"❌ API request failed: {response.status_code} - {response.text}")
-            return None
+        except requests.exceptions.Timeout:
+            print(f"⏱️ API request timed out.")
+            sleep_time = backoff_factor ** attempt
+            print(f"⏱️ Retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
+        except Exception as e:
+            print(f"❌ Error calling Claude API: {e}")
+            traceback.print_exc()
+            sleep_time = backoff_factor ** attempt
+            print(f"⏱️ Retrying in {sleep_time} seconds...")
+            time.sleep(sleep_time)
     
-    except Exception as e:
-        print(f"❌ Error calling Claude API: {e}")
-        return None
+    print(f"❌ Failed after {max_retries} attempts")
+    return None
 
 # ✅ Fetch news analysis from Supabase
 def fetch_news_analysis(symbol):
@@ -97,6 +125,7 @@ def fetch_news_analysis(symbol):
 
     except Exception as e:
         print(f"❌ Database Error fetching news analysis: {e}")
+        traceback.print_exc()
         return []
 
 # ✅ Fetch SEC filings analysis from Supabase
@@ -138,6 +167,7 @@ def fetch_sec_analysis(symbol):
 
     except Exception as e:
         print(f"❌ Database Error fetching SEC analysis: {e}")
+        traceback.print_exc()
         return []
 
 # ✅ Fetch historical financial data
@@ -163,6 +193,7 @@ def fetch_historical_data(symbol):
 
     except Exception as e:
         print(f"❌ Database Error fetching historical data: {e}")
+        traceback.print_exc()
         return {}
 
 # ✅ Generate comprehensive forecast with Claude
@@ -201,10 +232,14 @@ def generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, histori
     Make sure each numerical projection is reasonable based on the company's history, industry trends, and the provided analyses. Justify each projection with a concise but comprehensive rationale.
     """
     
-    # Prepare the data
-    news_analysis_json = json.dumps(news_analysis, indent=2)
-    sec_analysis_json = json.dumps(sec_analysis, indent=2)
-    historical_data_json = json.dumps(historical_data, indent=2)
+    # Prepare the data - trim data to reduce payload size
+    news_analysis_json = json.dumps(news_analysis, indent=None)
+    sec_analysis_json = json.dumps(sec_analysis, indent=None)
+    historical_data_json = json.dumps(historical_data, indent=None)
+    
+    print(f"📊 News analysis: {len(news_analysis_json)} bytes")
+    print(f"📊 SEC analysis: {len(sec_analysis_json)} bytes")
+    print(f"📊 Historical data: {len(historical_data_json)} bytes")
     
     # Create the prompt
     prompt = f"""Generate a comprehensive 5-year financial forecast for {symbol}.
@@ -227,8 +262,12 @@ For each metric and year, provide specific numerical values (percentages) for bu
 Return your analysis in the JSON format specified in the system instructions.
 """
     
-    # Call Claude API
+    # Call Claude API with retry mechanism
+    print("☎️ Calling Claude API (this may take a minute)...")
+    start_time = time.time()
     response_text = call_claude_api(prompt, system_prompt)
+    end_time = time.time()
+    print(f"⏱️ API call took {end_time - start_time:.2f} seconds")
     
     if not response_text:
         print("❌ Failed to generate forecast with Claude API")
@@ -238,7 +277,7 @@ Return your analysis in the JSON format specified in the system instructions.
     print(response_text[:500] + "..." if len(response_text) > 500 else response_text)
     print("------------------------\n")
     
-    # Parse the response as JSON
+    # Parse the response as JSON with robust error handling
     try:
         # Try to find the JSON object in the response
         json_start = response_text.find('{')
@@ -250,10 +289,13 @@ Return your analysis in the JSON format specified in the system instructions.
             return forecast_data
         else:
             print("❌ Failed to extract JSON from Claude's response")
+            print(f"Response text: {response_text[:500]}...")
             return None
     
     except Exception as e:
         print(f"❌ Error parsing JSON from Claude's response: {e}")
+        print(f"Response text: {response_text[:500]}...")
+        traceback.print_exc()
         return None
 
 # ✅ Store comprehensive forecast in Supabase
@@ -322,47 +364,63 @@ def store_comprehensive_forecast(symbol, forecast_data):
     
     except Exception as e:
         print(f"❌ Database Error storing forecast: {e}")
+        traceback.print_exc()
         if 'conn' in locals() and conn:
             conn.close()
         return False
 
 # ✅ Main function
 def generate_and_store_comprehensive_forecast(symbol):
-    """Main function to generate and store comprehensive forecast."""
+    """Main function to generate and store comprehensive forecast with better error handling."""
     print(f"🔍 Generating comprehensive forecast for {symbol}...")
+    start_time = time.time()
     
-    # Fetch all required data
-    news_analysis = fetch_news_analysis(symbol)
-    sec_analysis = fetch_sec_analysis(symbol)
-    historical_data = fetch_historical_data(symbol)
-    
-    # Check if we have all the data we need
-    if not news_analysis:
-        print(f"⚠️ Missing news analysis for {symbol}")
-    if not sec_analysis:
-        print(f"⚠️ Missing SEC analysis for {symbol}")
-    if not historical_data:
-        print(f"⚠️ Missing historical data for {symbol}")
-    
-    if not news_analysis and not sec_analysis:
-        print(f"❌ Cannot generate forecast without any analysis data")
-        return False
-    
-    # Generate forecast
-    forecast_data = generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, historical_data)
-    
-    if not forecast_data:
-        print(f"❌ Failed to generate comprehensive forecast for {symbol}")
-        return False
-    
-    # Store forecast
-    success = store_comprehensive_forecast(symbol, forecast_data)
-    
-    if success:
-        print(f"🚀 Comprehensive forecast for {symbol} completed and stored!")
-        return True
-    else:
-        print(f"❌ Failed to store comprehensive forecast for {symbol}")
+    try:
+        # Fetch all required data
+        news_analysis = fetch_news_analysis(symbol)
+        print(f"✅ Fetched news analysis: {len(news_analysis)} items")
+        
+        sec_analysis = fetch_sec_analysis(symbol)
+        print(f"✅ Fetched SEC analysis: {len(sec_analysis)} items")
+        
+        historical_data = fetch_historical_data(symbol)
+        print(f"✅ Fetched historical data")
+        
+        # Check if we have all the data we need
+        if not news_analysis:
+            print(f"⚠️ Missing news analysis for {symbol}")
+        if not sec_analysis:
+            print(f"⚠️ Missing SEC analysis for {symbol}")
+        if not historical_data:
+            print(f"⚠️ Missing historical data for {symbol}")
+        
+        if not news_analysis and not sec_analysis:
+            print(f"❌ Cannot generate forecast without any analysis data")
+            return False
+        
+        # Generate forecast
+        forecast_data = generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, historical_data)
+        
+        if not forecast_data:
+            print(f"❌ Failed to generate comprehensive forecast for {symbol}")
+            return False
+        
+        # Store forecast
+        success = store_comprehensive_forecast(symbol, forecast_data)
+        
+        end_time = time.time()
+        print(f"⏱️ Total processing time: {end_time - start_time:.2f} seconds")
+        
+        if success:
+            print(f"🚀 Comprehensive forecast for {symbol} completed and stored!")
+            return True
+        else:
+            print(f"❌ Failed to store comprehensive forecast for {symbol}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        traceback.print_exc()
         return False
 
 # ✅ Execute when run as script
