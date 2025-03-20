@@ -4,13 +4,7 @@ from datetime import datetime, timezone
 import os
 import sys
 
-try:
-    import anthropic
-except ImportError:
-    print("Warning: anthropic module not available")
-    anthropic = None
-
-# ✅ Claude API Configuration (Using Official SDK)
+# ✅ Claude API Configuration (Using direct HTTP)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # ✅ PostgreSQL Connection Credentials (Direct Connection)
@@ -90,7 +84,51 @@ def create_default_metrics():
     
     return metrics
 
-# ✅ Send request to Claude API using Official SDK
+def call_claude_api(prompt, system_prompt):
+    """Call Claude API directly using HTTP requests."""
+    if not ANTHROPIC_API_KEY:
+        print("⚠️ No Anthropic API key provided")
+        return None
+        
+    import requests
+    
+    headers = {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01"
+    }
+    
+    data = {
+        "model": "claude-3-7-sonnet-20250219",
+        "max_tokens": 1500,
+        "temperature": 0.3,
+        "system": system_prompt,
+        "messages": [
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ]
+    }
+    
+    try:
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=data
+        )
+        
+        if response.status_code == 200:
+            return response.json()['content'][0]['text']
+        else:
+            print(f"❌ API request failed: {response.status_code} - {response.text}")
+            return None
+    
+    except Exception as e:
+        print(f"❌ Error calling Claude API: {e}")
+        return None
+        
+# ✅ Send request to Claude API using direct HTTP requests
 def analyze_news_sentiment(symbol):
     """Send news and press releases to Claude for sentiment analysis."""
     news_articles, press_releases = fetch_news_and_press(symbol)
@@ -134,99 +172,40 @@ Provide detailed analysis for these specific financial metrics:
 
 For each metric, explain how the news affects bull case, base case, and bear case scenarios."""
 
-    if anthropic is None:
-        print("⚠️ Anthropic module not available - using simulated analysis")
+    # Use direct HTTP request instead of Anthropic client
+    text_content = call_claude_api(user_prompt, system_prompt)
+    
+    if not text_content:
+        print("Falling back to simulated analysis")
         text_content = f"""## Revenue Growth (%)
 
-Bull Case: Strong product demand for {symbol} suggests continued revenue growth.
+Bull Case: Simulated positive analysis for {symbol} based on recent news.
 
-Base Case: Market conditions indicate stable growth potential.
+Base Case: Simulated neutral analysis for {symbol} based on market trends.
 
-Bear Case: Competitive pressures may impact revenue expectations.
+Bear Case: Simulated negative analysis for {symbol} based on potential risks.
 
-Importance: High
+Importance: Medium
 
 Confidence: Medium
 
 ## Gross Profit Margin (%)
 
-Bull Case: Product mix shifts toward higher-margin offerings.
+Bull Case: Simulated positive margin outlook based on cost efficiencies.
 
-Base Case: Margins likely to remain consistent with historical trends.
+Base Case: Simulated stable margin projection based on historical performance.
 
-Bear Case: Input cost increases could pressure margins.
+Bear Case: Simulated negative margin pressure due to competitive factors.
 
 Importance: Medium
 
 Confidence: Medium"""
-    else:
-        # Initialize the client carefully
-        try:
-            if hasattr(anthropic, 'Anthropic'):
-                client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-            else:
-                client = anthropic.Client(api_key=ANTHROPIC_API_KEY)
-                
-            # Try the newer messages API first
-            try:
-                if hasattr(client, 'messages') and hasattr(client.messages, 'create'):
-                    print("Using newer Anthropic messages API")
-                    message = client.messages.create(
-                        model="claude-3-7-sonnet-20250219",
-                        max_tokens=1500,
-                        temperature=0.3,
-                        system=system_prompt,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": user_prompt
-                                    }
-                                ]
-                            }
-                        ]
-                    )
-                    
-                    # Extract text content from the structured response
-                    text_content = ""
-                    for block in message.content:
-                        if hasattr(block, 'text'):
-                            text_content += block.text
-                        elif isinstance(block, dict) and 'text' in block:
-                            text_content += block['text']
-                
-                # Fall back to older API if needed
-                else:
-                    print("Using legacy Anthropic completion API")
-                    full_prompt = f"\n\nHuman: {user_prompt}\n\nAssistant:"
-                    if hasattr(client, 'completion'):
-                        response = client.completion(
-                            prompt=full_prompt,
-                            model="claude-2.0",
-                            max_tokens_to_sample=1500,
-                            temperature=0.3
-                        )
-                        text_content = response.completion
-                    else:
-                        print("Neither messages.create nor completion method found")
-                        text_content = "API method not found"
-                        
-            except Exception as e:
-                print(f"❌ Error calling Anthropic API method: {e}")
-                print("Falling back to simulated analysis")
-                return create_default_metrics()
-                
-        except Exception as e:
-            print(f"❌ Error initializing Anthropic client: {e}")
-            print("Falling back to simulated analysis")
-            return create_default_metrics()
     
     print("\n--- Claude's Response ---")
     print(text_content[:500] + "..." if len(text_content) > 500 else text_content)
     print("------------------------\n")
     
+    # Rest of your parsing logic remains the same...
     # Initialize metrics with defaults
     metrics = create_default_metrics()
     
