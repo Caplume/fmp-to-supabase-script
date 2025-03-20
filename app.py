@@ -26,10 +26,10 @@ def run_script():
     # Validate script name for security
     allowed_scripts = [
         "scrape_articles_supabase_render.py",
-        "scrape_sec_filings.py",
-        "fetch_press_releases.py",
-        "analyze_news_sentiment.py",
-        "analyze_sec_filings.py"
+        "scrape_sec_filings_render.py",
+        "fetch_press_releases_render.py",
+        "analyze_news_sentiment_render.py",
+        "analyze_sec_filings_render.py"
     ]
     
     if script_name not in allowed_scripts:
