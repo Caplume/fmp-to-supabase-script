@@ -6,12 +6,12 @@ import os
 import sys
 
 # Get credentials from environment variables (with fallbacks for local testing)
-# ✅ PostgreSQL Connection Credentials with Connection Pooler
+# ✅ PostgreSQL Connection Credentials (Direct Connection)
 DB_NAME = os.environ.get("DB_NAME", "postgres")
 DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "3elJBVtbBkZ1YEdr")
-DB_HOST = os.environ.get("DB_HOST", "postgres.aybqlqgrbcxxuvmuibdx.supabase.co")  # Connection pooler hostname
-DB_PORT = os.environ.get("DB_PORT", "6543")  # Connection pooler port
+DB_HOST = os.environ.get("DB_HOST", "db.aybqlqgrbcxxuvmuibdx.supabase.co")  # Direct connection
+DB_PORT = os.environ.get("DB_PORT", "5432")  # Standard PostgreSQL port
 
 # ✅ FMP API Key
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "E1x0AcpDC2qVyv4ebf2W9Wjge9EemKGw")
@@ -95,11 +95,11 @@ def store_articles_in_supabase(articles):
         return 0
 
     try:
-        # Use connection pooler with pgbouncer parameter
+        # Use direct connection with connection string
         conn_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=require"
-        print(f"Connecting with: {conn_string}") # Add this for debugging
+        print(f"Connecting with: {conn_string}")
         conn = psycopg2.connect(conn_string)
-
+        
         cur = conn.cursor()
 
         for article in articles:
