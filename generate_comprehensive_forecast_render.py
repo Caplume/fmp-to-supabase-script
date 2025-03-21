@@ -279,15 +279,14 @@ Return your analysis in the JSON format specified in the system instructions.
     print("------------------------\n")
     
     try:
-        # Try to extract a JSON code block (```json ... ```)
-        match = re.search(r"```json\s*(\{.*?\})\s*```", response_text, re.DOTALL)
-        
+        # Try to extract first full {...} block, even if not wrapped in ```json
+        match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if match:
-            json_str = match.group(1)
+            json_str = match.group(0)
             forecast_data = json.loads(json_str)
             return forecast_data
         else:
-            print("❌ Could not find valid JSON code block in Claude's response.")
+            print("❌ Could not find JSON object in Claude's response.")
             print(f"Response text preview:\n{response_text[:500]}...")
             return None
 
