@@ -44,8 +44,7 @@ def call_claude_api(prompt, system_prompt, max_retries=3, backoff_factor=2):
                 "role": "user", 
                 "content": prompt
             }
-        ],
-        "anthropic_version": "bedrock-2023-05-31"
+        ]
     }
     
     for attempt in range(max_retries):
