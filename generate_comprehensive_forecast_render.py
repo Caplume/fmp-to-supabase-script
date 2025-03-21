@@ -205,7 +205,7 @@ def generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, histori
     Your task is to create detailed 5-year forward projections for key financial metrics based on historical data and qualitative analyses of news articles and SEC filings.
     
     For each metric and each year (1-5), provide:
-    1. A specific numerical value (percentage) for bull case, base case, and bear case
+    1. A specific numerical value (percentage) for the base case only
     2. A comprehensive rationale that synthesizes insights from news, SEC filings, and historical trends
     
     Format your response as structured JSON with the following schema:
@@ -215,9 +215,8 @@ def generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, histori
         {
           "metric": "Revenue Growth (%)",
           "year": 1,
-          "bull_case": {"value": 25.4, "rationale": "Detailed justification..."},
-          "base_case": {"value": 18.2, "rationale": "Detailed justification..."},
-          "bear_case": {"value": 12.5, "rationale": "Detailed justification..."}
+          "value": 18.2,
+          "rationale": "Detailed justification..."
         },
         // Repeat for each metric and each year (1-5)
       ]
@@ -258,7 +257,7 @@ Based on the following inputs:
 
 Create detailed projections for each key metric (Revenue Growth, Gross Profit Margin, EBITDA Margin, FCF, and CapEx) for each of the next 5 years.
 
-For each metric and year, provide specific numerical values (percentages) for bull, base, and bear cases, along with detailed rationales that synthesize insights from all available information.
+For each metric and year, provide only the base case scenario with a specific numerical value (percentage) along with a detailed rationale that synthesizes insights from all available information.
 
 Return your analysis in the JSON format specified in the system instructions.
 """
@@ -319,19 +318,7 @@ def store_comprehensive_forecast(symbol, forecast_data):
             metric = forecast['metric']
             year = forecast['year']
             
-            # Bull case
-            cur.execute("""
-                INSERT INTO final_forecasts (symbol, metric, year, case_type, value, rationale)
-                VALUES (%s, %s, %s, 'bull', %s, %s)
-            """, (
-                symbol, 
-                metric, 
-                year, 
-                forecast['bull_case']['value'], 
-                forecast['bull_case']['rationale']
-            ))
-            
-            # Base case
+            # Only base case
             cur.execute("""
                 INSERT INTO final_forecasts (symbol, metric, year, case_type, value, rationale)
                 VALUES (%s, %s, %s, 'base', %s, %s)
@@ -339,20 +326,8 @@ def store_comprehensive_forecast(symbol, forecast_data):
                 symbol, 
                 metric, 
                 year, 
-                forecast['base_case']['value'], 
-                forecast['base_case']['rationale']
-            ))
-            
-            # Bear case
-            cur.execute("""
-                INSERT INTO final_forecasts (symbol, metric, year, case_type, value, rationale)
-                VALUES (%s, %s, %s, 'bear', %s, %s)
-            """, (
-                symbol, 
-                metric, 
-                year, 
-                forecast['bear_case']['value'], 
-                forecast['bear_case']['rationale']
+                forecast['value'], 
+                forecast['rationale']
             ))
         
         conn.commit()
