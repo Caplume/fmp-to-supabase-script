@@ -44,7 +44,8 @@ def call_claude_api(prompt, system_prompt, max_retries=3, backoff_factor=2):
                 "role": "user", 
                 "content": prompt
             }
-        ]
+        ],
+        "anthropic_version": "bedrock-2023-05-31"
     }
     
     for attempt in range(max_retries):
@@ -202,11 +203,11 @@ def generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, histori
     """Generate comprehensive forecast using Claude API."""
     system_prompt = """You are a senior financial analyst specializing in DCF models and forward-looking financial projections.
     
-    Your task is to create detailed 5-year forward projections for key financial metrics based on historical data and qualitative analyses of news articles and SEC filings.
+    Your task is to create concise 5-year forward projections for key financial metrics based on historical data and qualitative analyses of news articles and SEC filings.
     
     For each metric and each year (1-5), provide:
     1. A specific numerical value (percentage) for the base case only
-    2. A comprehensive rationale that synthesizes insights from news, SEC filings, and historical trends
+    2. A brief rationale that synthesizes key insights (keep under 200 characters per rationale)
     
     Format your response as structured JSON with the following schema:
     
@@ -216,7 +217,7 @@ def generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, histori
           "metric": "Revenue Growth (%)",
           "year": 1,
           "value": 18.2,
-          "rationale": "Detailed justification..."
+          "rationale": "Brief justification..."
         },
         // Repeat for each metric and each year (1-5)
       ]
@@ -229,7 +230,7 @@ def generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, histori
     4. FCF (% of Revenue)
     5. CapEx (% of Revenue)
     
-    Make sure each numerical projection is reasonable based on the company's history, industry trends, and the provided analyses. Justify each projection with a concise but comprehensive rationale.
+    Make sure each numerical projection is reasonable based on the company's history, industry trends, and the provided analyses. Be extremely concise in your rationales.
     """
     
     # Prepare the data - trim data to reduce payload size
@@ -242,7 +243,7 @@ def generate_comprehensive_forecast(symbol, news_analysis, sec_analysis, histori
     print(f"📊 Historical data: {len(historical_data_json)} bytes")
     
     # Create the prompt
-    prompt = f"""Generate a comprehensive 5-year financial forecast for {symbol}.
+    prompt = f"""Generate a brief 5-year financial forecast for {symbol}.
 
 Based on the following inputs:
 
@@ -255,11 +256,11 @@ Based on the following inputs:
 3. Historical Financial Data:
 {historical_data_json}
 
-Create detailed projections for each key metric (Revenue Growth, Gross Profit Margin, EBITDA Margin, FCF, and CapEx) for each of the next 5 years.
+Create numerical projections for each key metric (Revenue Growth, Gross Profit Margin, EBITDA Margin, FCF, and CapEx) for each of the next 5 years.
 
-For each metric and year, provide only the base case scenario with a specific numerical value (percentage) along with a detailed rationale that synthesizes insights from all available information.
+For each metric and year, provide only the base case scenario with a specific numerical value (percentage) along with a very brief rationale (under 200 characters per rationale).
 
-Return your analysis in the JSON format specified in the system instructions.
+Keep your response minimal and focused on the data. Return your analysis in the JSON format specified in the system instructions.
 """
     
     # Call Claude API with retry mechanism
@@ -282,8 +283,42 @@ Return your analysis in the JSON format specified in the system instructions.
         match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if match:
             json_str = match.group(0)
-            forecast_data = json.loads(json_str)
-            return forecast_data
+            try:
+                # Try to parse the complete JSON
+                forecast_data = json.loads(json_str)
+                return forecast_data
+            except json.JSONDecodeError as json_err:
+                print(f"⚠️ JSON parsing error: {json_err}")
+                print("Attempting to extract and repair the JSON...")
+                
+                # Try to extract just the forecasts array
+                forecasts_match = re.search(r'"forecasts"\s*:\s*\[(.*?)\]', json_str, re.DOTALL)
+                if forecasts_match:
+                    # Try to salvage individual forecast objects
+                    forecasts_str = forecasts_match.group(1)
+                    forecast_objects = []
+                    
+                    # Extract individual forecast objects
+                    objects_pattern = r'\{(.*?)\}'
+                    for obj_match in re.finditer(objects_pattern, forecasts_str, re.DOTALL):
+                        try:
+                            # Try to parse each forecast object individually
+                            obj_str = '{' + obj_match.group(1) + '}'
+                            # Make sure the object ends with a closing bracket
+                            if not obj_str.rstrip().endswith('}'):
+                                obj_str += '}'
+                            forecast_obj = json.loads(obj_str)
+                            forecast_objects.append(forecast_obj)
+                        except:
+                            continue
+                    
+                    if forecast_objects:
+                        return {"forecasts": forecast_objects}
+                
+                # If all parsing attempts fail
+                print("❌ Could not repair the JSON. Consider reducing the complexity or length of the response.")
+                print(f"Response text preview:\n{response_text[:500]}...")
+                return None
         else:
             print("❌ Could not find JSON object in Claude's response.")
             print(f"Response text preview:\n{response_text[:500]}...")
