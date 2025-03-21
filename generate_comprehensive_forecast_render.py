@@ -277,26 +277,27 @@ Return your analysis in the JSON format specified in the system instructions.
     print(response_text[:500] + "..." if len(response_text) > 500 else response_text)
     print("------------------------\n")
     
-    # Parse the response as JSON with robust error handling
-    try:
-        # Try to find the JSON object in the response
-        json_start = response_text.find('{')
-        json_end = response_text.rfind('}') + 1
-        
-        if json_start >= 0 and json_end > json_start:
-            json_str = response_text[json_start:json_end]
-            forecast_data = json.loads(json_str)
-            return forecast_data
-        else:
-            print("❌ Failed to extract JSON from Claude's response")
-            print(f"Response text: {response_text[:500]}...")
-            return None
+   import re
+
+try:
+    # Try to extract a JSON code block (```json ... ```)
+    match = re.search(r"```json\s*(\{.*?\})\s*```", response_text, re.DOTALL)
     
-    except Exception as e:
-        print(f"❌ Error parsing JSON from Claude's response: {e}")
-        print(f"Response text: {response_text[:500]}...")
-        traceback.print_exc()
+    if match:
+        json_str = match.group(1)
+        forecast_data = json.loads(json_str)
+        return forecast_data
+    else:
+        print("❌ Could not find valid JSON code block in Claude's response.")
+        print(f"Response text preview:\n{response_text[:500]}...")
         return None
+
+except Exception as e:
+    print(f"❌ Error parsing JSON from Claude's response: {e}")
+    print(f"Response text: {response_text[:500]}...")
+    traceback.print_exc()
+    return None
+
 
 # ✅ Store comprehensive forecast in Supabase
 def store_comprehensive_forecast(symbol, forecast_data):
