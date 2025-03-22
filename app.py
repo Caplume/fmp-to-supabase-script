@@ -31,7 +31,8 @@ def run_script():
         "analyze_news_sentiment_render.py",
         "analyze_sec_filings_render.py",
         "generate_comprehensive_forecast_render.py",
-        "orchestration-script.py"
+        "orchestration-script.py",
+        "flask_api_orchestration.py"
     ]
     
     if script_name not in allowed_scripts:
