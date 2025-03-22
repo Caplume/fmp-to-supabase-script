@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # Import CORS for cross-origin support
 import subprocess
 import os
 import sys
@@ -10,6 +11,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
 # Simple in-memory storage for job status
 job_status = {}
@@ -141,19 +143,58 @@ def run_script():
 def get_forecast(symbol):
     """Retrieve forecast data for a specific symbol."""
     try:
-        # This is a placeholder - you'll need to import and use psycopg2 here
-        # For now, we'll return a simple success message
+        import psycopg2
+        import json
+        
+        # Database connection parameters (use environment variables in production)
+        DB_NAME = os.environ.get("DB_NAME", "postgres")
+        DB_USER = os.environ.get("DB_USER", "postgres")
+        DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
+        DB_HOST = os.environ.get("DB_HOST", "db.aybqlqgrbcxxuvmuibdx.supabase.co")
+        DB_PORT = os.environ.get("DB_PORT", "5432")
+        
+        # Connect to the database
+        conn_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=require"
+        conn = psycopg2.connect(conn_string)
+        cur = conn.cursor()
+        
+        # Query for the forecast data
+        cur.execute("""
+            SELECT metric, year, case_type, value, rationale 
+            FROM final_forecasts 
+            WHERE symbol = %s
+            ORDER BY metric, year
+        """, (symbol,))
+        
+        # Fetch all results
+        forecast_rows = cur.fetchall()
+        
+        # Close the database connection
+        cur.close()
+        conn.close()
+        
+        # Format the results
+        forecasts = []
+        for row in forecast_rows:
+            forecasts.append({
+                "metric": row[0],
+                "year": row[1],
+                "case_type": row[2],
+                "value": row[3],
+                "rationale": row[4]
+            })
+        
         return jsonify({
             "symbol": symbol,
-            "status": "success",
-            "message": f"Forecast data retrieved for {symbol}",
-            "data": "Implement database query here to retrieve actual forecast data"
+            "forecasts": forecasts,
+            "count": len(forecasts)
         })
+        
     except Exception as e:
+        logger.error(f"Error retrieving forecast data: {str(e)}")
         return jsonify({
-            "symbol": symbol,
             "status": "error",
-            "error": str(e)
+            "message": str(e)
         }), 500
 
 @app.route('/', methods=['GET'])
