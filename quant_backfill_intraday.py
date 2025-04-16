@@ -13,8 +13,7 @@ DB_HOST = os.environ.get("DB_HOST")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 FMP_API_KEY = os.environ.get("FMP_API_KEY")
 
-TOTAL_DAYS_BACK = 120
-DAYS_TO_SKIP = 30
+TOTAL_DAYS_BACK = 180
 CHUNK_SIZE = 3  # FMP allows ~3 days per 1min request
 
 FMP_URL = "https://financialmodelingprep.com/stable/historical-chart/1min"
@@ -60,10 +59,9 @@ def insert_candles(symbol, candles):
 def backfill(symbol):
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=TOTAL_DAYS_BACK)
-    end_date = today - timedelta(days=DAYS_TO_SKIP)
     current = start_date
 
-    while current < end_date:
+    while current < today:
         from_str = current.strftime("%Y-%m-%d")
         to_str = (current + timedelta(days=CHUNK_SIZE - 1)).strftime("%Y-%m-%d")
 
