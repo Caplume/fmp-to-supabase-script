@@ -1,7 +1,9 @@
-import psycopg2
 import pandas as pd
+import numpy as np
+import psycopg2
+from datetime import datetime
 import os
-from datetime import datetime, timedelta
+import sys
 
 # === Config ===
 DB_NAME = os.environ.get("DB_NAME")
@@ -10,92 +12,98 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD")
 DB_HOST = os.environ.get("DB_HOST")
 DB_PORT = os.environ.get("DB_PORT", "5432")
 
-# === Connect ===
+# === Helpers ===
 def connect():
     conn_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=require"
     return psycopg2.connect(conn_string)
 
-# === Load Raw Candle Data ===
-def load_intraday_data(ticker):
-    conn = connect()
-    query = """
-        SELECT * FROM quant_candles_intraday
-        WHERE ticker = %s
-        ORDER BY datetime;
-    """
-    df = pd.read_sql_query(query, conn, params=(ticker,))
-    conn.close()
-    return df
+def compute_features(df):
+    df = df.sort_values("datetime")
+    
+    # Relative Volume: current volume / rolling 50-period average
+    df["rel_volume"] = df["volume"] / df["volume"].rolling(window=50).mean()
 
-# === Feature Engineering ===
-def engineer_features(df):
-    df = df.copy()
-    df['close'] = df['close'].astype(float)
-    df['rsi'] = df['close'].rolling(window=14).apply(lambda x: pd.Series(x).diff().pipe(lambda y: y[y > 0].sum() / abs(y[y < 0].sum()) if abs(y[y < 0].sum()) > 0 else 0)).apply(lambda rs: 100 - (100 / (1 + rs)))
-    df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum()
-    df['ma_50'] = df['close'].rolling(window=50).mean()
-    df['ma_200'] = df['close'].rolling(window=200).mean()
+    # RSI Calculation
+    delta = df["close"].diff()
+    gain = np.where(delta > 0, delta, 0)
+    loss = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(window=14).mean()
+    avg_loss = pd.Series(loss).rolling(window=14).mean()
+    rs = avg_gain / avg_loss
+    df["rsi"] = 100 - (100 / (1 + rs))
+
+    # VWAP
+    df["cum_vol_price"] = (df["close"] * df["volume"]).cumsum()
+    df["cum_volume"] = df["volume"].cumsum()
+    df["vwap"] = df["cum_vol_price"] / df["cum_volume"]
 
     # MACD
-    ema_12 = df['close'].ewm(span=12, adjust=False).mean()
-    ema_26 = df['close'].ewm(span=26, adjust=False).mean()
-    df['macd'] = ema_12 - ema_26
-    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+    ema_12 = df["close"].ewm(span=12, adjust=False).mean()
+    ema_26 = df["close"].ewm(span=26, adjust=False).mean()
+    df["macd"] = ema_12 - ema_26
+    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
 
-    # Volume Spike
-    df['avg_vol_20'] = df['volume'].rolling(window=20).mean()
-    df['rel_volume'] = df['volume'] / df['avg_vol_20'].replace(0, pd.NA)
+    # Moving Averages
+    df["ma_50"] = df["close"].rolling(window=50).mean()
+    df["ma_200"] = df["close"].rolling(window=200).mean()
 
-    # Trend Filter
-    df['is_uptrend'] = (df['ma_50'] > df['ma_200']).astype(int)
+    # Trend Flag
+    df["is_uptrend"] = df["ma_50"] > df["ma_200"]
+
+    # Clean up
+    df = df.drop(columns=["cum_vol_price", "cum_volume"])
+    df = df.dropna()
 
     return df
 
-# === Store Features ===
-def store_features(ticker, df):
+def store_features(symbol, df):
     conn = connect()
     cur = conn.cursor()
     inserted = 0
 
     for _, row in df.iterrows():
         try:
-            if pd.isnull(row['rsi']) or pd.isnull(row['macd']) or pd.isnull(row['vwap']) or pd.isnull(row['rel_volume']):
-                continue
-
             cur.execute("""
-                INSERT INTO quant_features_intraday (ticker, datetime, rsi, vwap, macd, macd_signal, ma_50, ma_200, rel_volume, is_uptrend)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO quant_features_intraday (
+                    ticker, datetime, rsi, vwap, macd, macd_signal, ma_50, ma_200, rel_volume, is_uptrend
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (ticker, datetime) DO NOTHING;
             """, (
-                ticker,
-                row['datetime'],
-                float(row['rsi']),
-                float(row['vwap']),
-                float(row['macd']),
-                float(row['macd_signal']),
-                float(row['ma_50']),
-                float(row['ma_200']),
-                float(row['rel_volume']),
-                int(row['is_uptrend'])
+                symbol, row["datetime"], row["rsi"], row["vwap"],
+                row["macd"], row["macd_signal"], row["ma_50"], row["ma_200"],
+                row["rel_volume"], bool(row["is_uptrend"])  # ✅ Cast to boolean
             ))
             inserted += 1
-
         except Exception as e:
             print(f"⚠️ Skipped row: {e}")
-            conn.rollback()
 
     conn.commit()
     conn.close()
-    print(f"✅ Inserted {inserted} engineered rows for {ticker}.")
+    print(f"✅ Stored {inserted} feature rows for {symbol}")
 
 # === Main ===
+def engineer(symbol):
+    print(f"🔍 Engineering features for: {symbol}")
+    conn = connect()
+    query = """
+        SELECT datetime, open, high, low, close, volume
+        FROM quant_candles_intraday
+        WHERE ticker = %s
+        ORDER BY datetime ASC
+    """
+    df = pd.read_sql_query(query, conn, params=(symbol,))
+    conn.close()
+
+    if df.empty:
+        print("❌ No data found.")
+        return
+
+    df = compute_features(df)
+    store_features(symbol, df)
+
 if __name__ == "__main__":
-    import sys
     if len(sys.argv) > 1:
         ticker = sys.argv[1].upper()
-        print(f"🔍 Engineering features for: {ticker}\n")
-        df = load_intraday_data(ticker)
-        df = engineer_features(df)
-        store_features(ticker, df)
+        engineer(ticker)
     else:
         print("❌ Please provide a ticker symbol. Example: python3 quant_engineer_features.py GRRR")
