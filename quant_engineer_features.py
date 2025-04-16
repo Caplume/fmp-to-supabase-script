@@ -44,7 +44,7 @@ def engineer_features(df):
 
     # Volume Spike
     df['avg_vol_20'] = df['volume'].rolling(window=20).mean()
-    df['rel_volume'] = df['volume'] / df['avg_vol_20']
+    df['rel_volume'] = df['volume'] / df['avg_vol_20'].replace(0, pd.NA)
 
     # Trend Filter
     df['is_uptrend'] = (df['ma_50'] > df['ma_200']).astype(int)
@@ -58,10 +58,10 @@ def store_features(ticker, df):
     inserted = 0
 
     for _, row in df.iterrows():
-        if pd.isnull(row['rsi']) or pd.isnull(row['macd']) or pd.isnull(row['vwap']):
-            continue
-
         try:
+            if pd.isnull(row['rsi']) or pd.isnull(row['macd']) or pd.isnull(row['vwap']) or pd.isnull(row['rel_volume']):
+                continue
+
             cur.execute("""
                 INSERT INTO quant_features_intraday (ticker, datetime, rsi, vwap, macd, macd_signal, ma_50, ma_200, rel_volume, is_uptrend)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -69,18 +69,20 @@ def store_features(ticker, df):
             """, (
                 ticker,
                 row['datetime'],
-                row['rsi'],
-                row['vwap'],
-                row['macd'],
-                row['macd_signal'],
-                row['ma_50'],
-                row['ma_200'],
-                row['rel_volume'],
-                row['is_uptrend']
+                float(row['rsi']),
+                float(row['vwap']),
+                float(row['macd']),
+                float(row['macd_signal']),
+                float(row['ma_50']),
+                float(row['ma_200']),
+                float(row['rel_volume']),
+                int(row['is_uptrend'])
             ))
             inserted += 1
+
         except Exception as e:
             print(f"⚠️ Skipped row: {e}")
+            conn.rollback()
 
     conn.commit()
     conn.close()
